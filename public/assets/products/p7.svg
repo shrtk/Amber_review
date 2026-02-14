@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <rect width="480" height="320" fill="#e7f5ff"/>
+  <rect x="140" y="40" width="200" height="240" rx="18" fill="#d0ebff" stroke="#182025" stroke-width="6"/>
+  <line x1="140" y1="150" x2="340" y2="150" stroke="#182025" stroke-width="4"/>
+  <circle cx="228" cy="188" r="7" fill="#182025"/>
+  <circle cx="252" cy="188" r="7" fill="#182025"/>
+  <path d="M220 220 Q240 204 260 220" fill="none" stroke="#182025" stroke-width="5" stroke-linecap="round"/>
+  <text x="240" y="306" text-anchor="middle" font-size="24" font-family="Arial Black, sans-serif" fill="#182025">空腹を説得する冷蔵庫</text>
+</svg>

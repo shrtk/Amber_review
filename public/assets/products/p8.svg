@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <rect width="480" height="320" fill="#fff4e6"/>
+  <rect x="130" y="36" width="220" height="248" rx="10" fill="#ffd8a8" stroke="#182025" stroke-width="6"/>
+  <circle cx="300" cy="158" r="12" fill="#182025"/>
+  <text x="240" y="302" text-anchor="middle" font-size="28" font-family="Arial Black, sans-serif" fill="#182025">反省しないドアベル</text>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <rect width="480" height="320" fill="#e7f7f8"/>
+  <circle cx="240" cy="160" r="116" fill="#bfeff0" stroke="#182025" stroke-width="6"/>
+  <circle cx="240" cy="160" r="16" fill="#182025"/>
+  <line x1="240" y1="160" x2="240" y2="100" stroke="#182025" stroke-width="6"/>
+  <line x1="240" y1="160" x2="286" y2="190" stroke="#182025" stroke-width="6"/>
+  <text x="240" y="278" text-anchor="middle" font-size="30" font-family="Arial Black, sans-serif" fill="#182025">空気読める目覚まし</text>
+</svg>

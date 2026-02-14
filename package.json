@@ -1,0 +1,10 @@
+{
+  "name": "amber-review-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Party game for writing fake product reviews",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

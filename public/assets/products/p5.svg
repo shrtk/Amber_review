@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <rect width="480" height="320" fill="#ecf9ec"/>
+  <rect x="178" y="196" width="124" height="76" rx="10" fill="#d97745" stroke="#182025" stroke-width="5"/>
+  <ellipse cx="240" cy="118" rx="94" ry="86" fill="#85cc7a" stroke="#182025" stroke-width="6"/>
+  <circle cx="212" cy="110" r="8" fill="#182025"/>
+  <circle cx="268" cy="110" r="8" fill="#182025"/>
+  <path d="M210 146 Q240 170 270 146" fill="none" stroke="#182025" stroke-width="6" stroke-linecap="round"/>
+  <text x="240" y="302" text-anchor="middle" font-size="28" font-family="Arial Black, sans-serif" fill="#182025">会話が弾む植物</text>
+</svg>

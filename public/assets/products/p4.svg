@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <rect width="480" height="320" fill="#fff1e6"/>
+  <rect x="90" y="60" width="300" height="200" rx="24" fill="#ffd0b0" stroke="#182025" stroke-width="6"/>
+  <rect x="150" y="102" width="180" height="72" rx="12" fill="#fff" stroke="#182025" stroke-width="4"/>
+  <text x="240" y="148" text-anchor="middle" font-size="26" font-family="Arial Black, sans-serif" fill="#182025">-0.1kg!?</text>
+  <text x="240" y="214" text-anchor="middle" font-size="24" font-family="Meiryo, sans-serif" fill="#182025">今日もえらい！</text>
+</svg>
