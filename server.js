@@ -9,14 +9,14 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const ROOM_TTL_MS = 1000 * 60 * 60 * 6;
 
 const PRODUCTS = [
-  { id: "p1", name: "自動で拍手してくれる箸", category: "キッチン", image: "/assets/products/p1.svg" },
-  { id: "p2", name: "寝落ち専用ビジネスバッグ", category: "仕事道具", image: "/assets/products/p2.svg" },
-  { id: "p3", name: "空気の読める目覚まし時計", category: "家電", image: "/assets/products/p3.svg" },
-  { id: "p4", name: "褒めて伸ばす体重計", category: "ヘルスケア", image: "/assets/products/p4.svg" },
-  { id: "p5", name: "会話が弾む観葉植物", category: "インテリア", image: "/assets/products/p5.svg" },
-  { id: "p6", name: "言い訳を提案する傘", category: "日用品", image: "/assets/products/p6.svg" },
-  { id: "p7", name: "空腹を説得する冷蔵庫", category: "家電", image: "/assets/products/p7.svg" },
-  { id: "p8", name: "反省しないドアベル", category: "生活雑貨", image: "/assets/products/p8.svg" }
+  { id: "p1", name: "Auto Clapping Chopsticks", category: "Kitchen", image: "assets/products/p1.svg" },
+  { id: "p2", name: "Sleep-Mode Briefcase", category: "Work Gear", image: "assets/products/p2.svg" },
+  { id: "p3", name: "Social Alarm Clock", category: "Home Appliance", image: "assets/products/p3.svg" },
+  { id: "p4", name: "Complimenting Scale", category: "Health", image: "assets/products/p4.svg" },
+  { id: "p5", name: "Talkative Houseplant", category: "Interior", image: "assets/products/p5.svg" },
+  { id: "p6", name: "Excuse-Suggestion Umbrella", category: "Daily Item", image: "assets/products/p6.svg" },
+  { id: "p7", name: "Negotiating Fridge", category: "Home Appliance", image: "assets/products/p7.svg" },
+  { id: "p8", name: "Shameless Doorbell", category: "Lifestyle", image: "assets/products/p8.svg" }
 ];
 
 const rooms = new Map();
@@ -25,7 +25,10 @@ function json(res, statusCode, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body)
+    "Content-Length": Buffer.byteLength(body),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
   });
   res.end(body);
 }
@@ -35,9 +38,7 @@ function parseBody(req) {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 1024 * 1024) {
-        reject(new Error("Payload too large"));
-      }
+      if (data.length > 1024 * 1024) reject(new Error("Payload too large"));
     });
     req.on("end", () => {
       try {
@@ -50,21 +51,10 @@ function parseBody(req) {
   });
 }
 
-function generateRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i += 1) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return code;
-}
-
-function randomRoomCode() {
-  let code = generateRoomCode();
-  while (rooms.has(code)) {
-    code = generateRoomCode();
-  }
-  return code;
+function clampNumber(value, min, max, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(num)));
 }
 
 function sanitizeSettings(input = {}) {
@@ -77,10 +67,19 @@ function sanitizeSettings(input = {}) {
   };
 }
 
-function clampNumber(value, min, max, fallback) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(num)));
+function generateRoomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 5; i += 1) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+function randomRoomCode() {
+  let code = generateRoomCode();
+  while (rooms.has(code)) code = generateRoomCode();
+  return code;
 }
 
 function shuffle(list) {
@@ -100,6 +99,21 @@ function activePlayerIds(room) {
   return room.players.map((p) => p.id);
 }
 
+function resetTimer(room) {
+  if (room.timer) {
+    clearTimeout(room.timer);
+    room.timer = null;
+  }
+}
+
+function allSubmitted(room) {
+  return activePlayerIds(room).every((id) => Boolean(room.roundSubmissions[id]));
+}
+
+function allVoted(room) {
+  return activePlayerIds(room).every((id) => Boolean(room.roundVotes[id]));
+}
+
 function startRound(room) {
   room.roundIndex += 1;
   room.phase = "writing";
@@ -110,9 +124,7 @@ function startRound(room) {
   room.currentProduct = room.productPool[room.roundIndex % room.productPool.length];
   room.updatedAt = Date.now();
   resetTimer(room);
-  room.timer = setTimeout(() => {
-    endWriting(room);
-  }, room.settings.timeLimitSec * 1000);
+  room.timer = setTimeout(() => endWriting(room), room.settings.timeLimitSec * 1000);
 }
 
 function endWriting(room) {
@@ -121,9 +133,7 @@ function endWriting(room) {
   room.revealDeadline = Date.now() + 6000;
   room.updatedAt = Date.now();
   resetTimer(room);
-  room.timer = setTimeout(() => {
-    startVoting(room);
-  }, 6000);
+  room.timer = setTimeout(() => startVoting(room), 6000);
 }
 
 function startVoting(room) {
@@ -135,11 +145,8 @@ function startVoting(room) {
 }
 
 function finalizeRound(room) {
-  const players = room.players;
   const points = {};
-  for (const p of players) {
-    points[p.id] = 0;
-  }
+  for (const p of room.players) points[p.id] = 0;
 
   for (const vote of Object.values(room.roundVotes)) {
     for (const [targetId, score] of Object.entries(vote.ratings)) {
@@ -147,7 +154,7 @@ function finalizeRound(room) {
     }
   }
 
-  const reviews = players
+  const reviews = room.players
     .filter((p) => room.roundSubmissions[p.id])
     .map((p) => {
       room.scores[p.id] += points[p.id] || 0;
@@ -175,45 +182,24 @@ function finalizeRound(room) {
 function finalizeGame(room) {
   room.phase = "final";
   room.finalRanking = room.players
-    .map((p) => ({
-      playerId: p.id,
-      playerName: p.name,
-      totalPoints: room.scores[p.id]
-    }))
+    .map((p) => ({ playerId: p.id, playerName: p.name, totalPoints: room.scores[p.id] }))
     .sort((a, b) => b.totalPoints - a.totalPoints);
   room.updatedAt = Date.now();
 }
 
-function allSubmitted(room) {
-  const ids = activePlayerIds(room);
-  return ids.every((id) => Boolean(room.roundSubmissions[id]));
-}
-
-function allVoted(room) {
-  const ids = activePlayerIds(room);
-  return ids.every((id) => Boolean(room.roundVotes[id]));
-}
-
-function resetTimer(room) {
-  if (room.timer) {
-    clearTimeout(room.timer);
-    room.timer = null;
-  }
+function validateName(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 24);
 }
 
 function roomView(room, meId) {
   const me = room.players.find((p) => p.id === meId);
   if (!me) return null;
-  const ownReview = room.roundSubmissions ? room.roundSubmissions[meId] : "";
-  const submissionCount = Object.keys(room.roundSubmissions || {}).length;
-  const votingCount = Object.keys(room.roundVotes || {}).length;
+
   const canVoteTargets = room.players
     .filter((p) => p.id !== meId && room.roundSubmissions[p.id])
-    .map((p) => ({
-      playerId: p.id,
-      playerName: p.name,
-      text: room.roundSubmissions[p.id]
-    }));
+    .map((p) => ({ playerId: p.id, playerName: p.name, text: room.roundSubmissions[p.id] }));
 
   return {
     roomCode: room.code,
@@ -226,22 +212,17 @@ function roomView(room, meId) {
     currentProduct: room.currentProduct,
     writingDeadline: room.writingDeadline,
     revealDeadline: room.revealDeadline,
-    players: room.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      score: room.scores[p.id]
-    })),
-    ownReview,
-    submissionCount,
-    votingCount,
-    submissions: room.phase === "writing"
-      ? canVoteTargets.filter((x) => x.playerId === meId)
-      : canVoteTargets,
-    allRevealedSubmissions: room.phase === "reveal" || room.phase === "voting" || room.phase === "results" || room.phase === "final"
-      ? room.players
-          .filter((p) => room.roundSubmissions[p.id])
-          .map((p) => ({ playerId: p.id, playerName: p.name, text: room.roundSubmissions[p.id] }))
-      : [],
+    players: room.players.map((p) => ({ id: p.id, name: p.name, score: room.scores[p.id] })),
+    ownReview: room.roundSubmissions[meId] || "",
+    submissionCount: Object.keys(room.roundSubmissions).length,
+    votingCount: Object.keys(room.roundVotes).length,
+    submissions: room.phase === "writing" ? canVoteTargets.filter((x) => x.playerId === meId) : canVoteTargets,
+    allRevealedSubmissions:
+      room.phase === "reveal" || room.phase === "voting" || room.phase === "results" || room.phase === "final"
+        ? room.players
+            .filter((p) => room.roundSubmissions[p.id])
+            .map((p) => ({ playerId: p.id, playerName: p.name, text: room.roundSubmissions[p.id] }))
+        : [],
     myVote: room.roundVotes[meId] || null,
     lastRoundResult: room.lastRoundResult,
     roundHistory: room.phase === "final" ? room.roundHistory : [],
@@ -249,10 +230,8 @@ function roomView(room, meId) {
   };
 }
 
-function validateName(name) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, 24);
+function badRequest(res) {
+  json(res, 400, { error: "Bad request" });
 }
 
 function handleApi(req, res, parsedUrl) {
@@ -260,16 +239,16 @@ function handleApi(req, res, parsedUrl) {
     return parseBody(req)
       .then((body) => {
         const name = validateName(body.name);
-        if (!name) return json(res, 400, { error: "名前を入力してください。" });
-        const roomCode = randomRoomCode();
+        if (!name) return json(res, 400, { error: "Name is required." });
+
         const playerId = randomUUID();
-        const settings = sanitizeSettings(body.settings);
+        const roomCode = randomRoomCode();
         const room = {
           code: roomCode,
           hostId: playerId,
           phase: "lobby",
           players: [{ id: playerId, name }],
-          settings,
+          settings: sanitizeSettings(body.settings),
           roundIndex: -1,
           productPool: shuffle(PRODUCTS),
           currentProduct: null,
@@ -286,9 +265,9 @@ function handleApi(req, res, parsedUrl) {
           updatedAt: Date.now()
         };
         rooms.set(roomCode, room);
-        json(res, 200, { roomCode, playerId });
+        return json(res, 200, { roomCode, playerId });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "POST" && parsedUrl.pathname === "/api/join-room") {
@@ -296,112 +275,112 @@ function handleApi(req, res, parsedUrl) {
       .then((body) => {
         const room = getRoom(body.roomCode);
         const name = validateName(body.name);
-        if (!room) return json(res, 404, { error: "ルームが見つかりません。" });
-        if (!name) return json(res, 400, { error: "名前を入力してください。" });
-        if (room.players.length >= 10) return json(res, 400, { error: "ルームが満員です。" });
-        if (room.phase !== "lobby") return json(res, 400, { error: "ゲーム開始後は参加できません。" });
-        if (room.players.some((p) => p.name === name)) return json(res, 400, { error: "同じ名前は使えません。" });
+        if (!room) return json(res, 404, { error: "Room not found." });
+        if (!name) return json(res, 400, { error: "Name is required." });
+        if (room.players.length >= 10) return json(res, 400, { error: "Room is full." });
+        if (room.phase !== "lobby") return json(res, 400, { error: "Game already started." });
+        if (room.players.some((p) => p.name === name)) return json(res, 400, { error: "Name already exists." });
+
         const playerId = randomUUID();
         room.players.push({ id: playerId, name });
         room.scores[playerId] = 0;
         room.updatedAt = Date.now();
-        json(res, 200, { roomCode: room.code, playerId });
+        return json(res, 200, { roomCode: room.code, playerId });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "POST" && parsedUrl.pathname === "/api/start-game") {
     return parseBody(req)
       .then((body) => {
         const room = getRoom(body.roomCode);
-        if (!room) return json(res, 404, { error: "ルームが見つかりません。" });
-        if (room.hostId !== body.playerId) return json(res, 403, { error: "ホストのみ開始できます。" });
-        if (room.players.length < 2) return json(res, 400, { error: "2人以上必要です。" });
-        if (room.phase !== "lobby") return json(res, 400, { error: "すでに開始されています。" });
+        if (!room) return json(res, 404, { error: "Room not found." });
+        if (room.hostId !== body.playerId) return json(res, 403, { error: "Host only." });
+        if (room.players.length < 2) return json(res, 400, { error: "At least 2 players required." });
+        if (room.phase !== "lobby") return json(res, 400, { error: "Already started." });
+
         room.productPool = shuffle(PRODUCTS);
         room.roundHistory = [];
         room.roundIndex = -1;
         room.lastRoundResult = null;
         for (const p of room.players) room.scores[p.id] = 0;
         startRound(room);
-        json(res, 200, { ok: true });
+        return json(res, 200, { ok: true });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "POST" && parsedUrl.pathname === "/api/submit-review") {
     return parseBody(req)
       .then((body) => {
         const room = getRoom(body.roomCode);
-        if (!room) return json(res, 404, { error: "ルームが見つかりません。" });
-        if (room.phase !== "writing") return json(res, 400, { error: "今はレビュー投稿できません。" });
-        if (!room.players.some((p) => p.id === body.playerId)) return json(res, 403, { error: "参加者ではありません。" });
+        if (!room) return json(res, 404, { error: "Room not found." });
+        if (room.phase !== "writing") return json(res, 400, { error: "Not in writing phase." });
+        if (!room.players.some((p) => p.id === body.playerId)) return json(res, 403, { error: "Player not in room." });
+
         const text = String(body.text || "").trim();
-        if (!text) return json(res, 400, { error: "レビューが空です。" });
+        if (!text) return json(res, 400, { error: "Review is empty." });
         if (room.settings.charLimit > 0 && text.length > room.settings.charLimit) {
-          return json(res, 400, { error: `文字数上限は ${room.settings.charLimit} 字です。` });
+          return json(res, 400, { error: `Character limit is ${room.settings.charLimit}.` });
         }
+
         room.roundSubmissions[body.playerId] = text.slice(0, 500);
         room.updatedAt = Date.now();
-        if (allSubmitted(room)) {
-          endWriting(room);
-        }
-        json(res, 200, { ok: true });
+        if (allSubmitted(room)) endWriting(room);
+        return json(res, 200, { ok: true });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "POST" && parsedUrl.pathname === "/api/submit-vote") {
     return parseBody(req)
       .then((body) => {
         const room = getRoom(body.roomCode);
-        if (!room) return json(res, 404, { error: "ルームが見つかりません。" });
-        if (room.phase !== "voting") return json(res, 400, { error: "今は投票できません。" });
-        if (!room.players.some((p) => p.id === body.playerId)) return json(res, 403, { error: "参加者ではありません。" });
+        if (!room) return json(res, 404, { error: "Room not found." });
+        if (room.phase !== "voting") return json(res, 400, { error: "Not in voting phase." });
+        if (!room.players.some((p) => p.id === body.playerId)) return json(res, 403, { error: "Player not in room." });
 
         const otherIds = room.players.map((p) => p.id).filter((id) => id !== body.playerId && room.roundSubmissions[id]);
         const ratings = body.ratings || {};
         for (const targetId of otherIds) {
           const score = Number(ratings[targetId]);
           if (!Number.isInteger(score) || score < 1 || score > 5) {
-            return json(res, 400, { error: "全レビューを1〜5点で評価してください。" });
+            return json(res, 400, { error: "Every review must be rated 1-5." });
           }
         }
 
         room.roundVotes[body.playerId] = { ratings, mvpTarget: null };
         room.updatedAt = Date.now();
-        if (allVoted(room)) {
-          finalizeRound(room);
-        }
-        json(res, 200, { ok: true });
+        if (allVoted(room)) finalizeRound(room);
+        return json(res, 200, { ok: true });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "POST" && parsedUrl.pathname === "/api/next-round") {
     return parseBody(req)
       .then((body) => {
         const room = getRoom(body.roomCode);
-        if (!room) return json(res, 404, { error: "ルームが見つかりません。" });
-        if (room.hostId !== body.playerId) return json(res, 403, { error: "ホストのみ操作できます。" });
-        if (room.phase !== "results") return json(res, 400, { error: "今は次ラウンドへ進めません。" });
+        if (!room) return json(res, 404, { error: "Room not found." });
+        if (room.hostId !== body.playerId) return json(res, 403, { error: "Host only." });
+        if (room.phase !== "results") return json(res, 400, { error: "Not in results phase." });
 
         if (room.roundIndex + 1 >= room.settings.roundCount) {
           finalizeGame(room);
         } else {
           startRound(room);
         }
-        json(res, 200, { ok: true });
+        return json(res, 200, { ok: true });
       })
-      .catch(() => json(res, 400, { error: "不正なリクエストです。" }));
+      .catch(() => badRequest(res));
   }
 
   if (req.method === "GET" && parsedUrl.pathname === "/api/state") {
     const room = getRoom(parsedUrl.searchParams.get("roomCode"));
     const playerId = parsedUrl.searchParams.get("playerId");
-    if (!room || !playerId) return json(res, 404, { error: "状態を取得できません。" });
+    if (!room || !playerId) return json(res, 404, { error: "State not found." });
     const view = roomView(room, playerId);
-    if (!view) return json(res, 403, { error: "参加者ではありません。" });
+    if (!view) return json(res, 403, { error: "Player not in room." });
     return json(res, 200, { serverTime: Date.now(), room: view });
   }
 
@@ -424,14 +403,16 @@ function mimeType(filePath) {
 }
 
 function serveStatic(req, res, parsedUrl) {
-  let reqPath = parsedUrl.pathname === "/" ? "/index.html" : parsedUrl.pathname;
+  const reqPath = parsedUrl.pathname === "/" ? "/index.html" : parsedUrl.pathname;
   const safePath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, "");
   const fullPath = path.join(PUBLIC_DIR, safePath);
+
   if (!fullPath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
   }
+
   fs.readFile(fullPath, (err, data) => {
     if (err) {
       res.writeHead(404);
@@ -445,13 +426,23 @@ function serveStatic(req, res, parsedUrl) {
 
 const server = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+
   if (parsedUrl.pathname.startsWith("/api/")) {
-    const handled = handleApi(req, res, parsedUrl);
-    if (handled === false) {
-      json(res, 404, { error: "APIが見つかりません。" });
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      });
+      res.end();
+      return;
     }
+
+    const handled = handleApi(req, res, parsedUrl);
+    if (handled === false) json(res, 404, { error: "API not found." });
     return;
   }
+
   serveStatic(req, res, parsedUrl);
 });
 

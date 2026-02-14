@@ -1,4 +1,5 @@
 const app = document.getElementById("app");
+const API_BASE_URL = (window.__API_BASE_URL__ || "").replace(/\/$/, "");
 
 const STORAGE_KEY = "amber-review-session";
 const state = {
@@ -49,7 +50,7 @@ function startPolling() {
 }
 
 async function apiPost(path, payload) {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -65,7 +66,7 @@ async function fetchState() {
     roomCode: state.session.roomCode,
     playerId: state.session.playerId
   });
-  const res = await fetch(`/api/state?${params.toString()}`);
+  const res = await fetch(apiUrl(`/api/state?${params.toString()}`));
   if (!res.ok) {
     state.error = "ルーム接続が切れました。";
     clearSession();
@@ -82,6 +83,11 @@ async function fetchState() {
     return;
   }
   render();
+}
+
+function apiUrl(path) {
+  if (!API_BASE_URL) return path;
+  return `${API_BASE_URL}${path}`;
 }
 
 function phaseLabel(phase) {
