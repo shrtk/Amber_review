@@ -7,14 +7,14 @@ const state = {
   room: null,
   serverTime: Date.now(),
   error: "",
+  notice: "",
+  lastNoticeId: null,
   poller: null,
   isComposingReview: false
 };
 
 render();
-if (state.session) {
-  startPolling();
-}
+if (state.session) startPolling();
 
 function loadSession() {
   try {
@@ -33,6 +33,8 @@ function saveSession(session) {
 function clearSession() {
   state.session = null;
   state.room = null;
+  state.notice = "";
+  state.lastNoticeId = null;
   localStorage.removeItem(STORAGE_KEY);
   stopPolling();
   render();
@@ -49,6 +51,10 @@ function startPolling() {
   state.poller = setInterval(fetchState, 1000);
 }
 
+function apiUrl(path) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 async function apiPost(path, payload) {
   const res = await fetch(apiUrl(path), {
     method: "POST",
@@ -56,7 +62,7 @@ async function apiPost(path, payload) {
     body: JSON.stringify(payload)
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "API error");
+  if (!res.ok) throw new Error(data.error || "エラーが発生しました。");
   return data;
 }
 
@@ -68,15 +74,29 @@ async function fetchState() {
   });
   const res = await fetch(apiUrl(`/api/state?${params.toString()}`));
   if (!res.ok) {
-    state.error = "ルーム接続が切れました。";
+    let message = "ルーム接続が切れました。";
+    try {
+      const payload = await res.json();
+      if (payload?.error) message = payload.error;
+    } catch {
+      // noop
+    }
+    state.error = message;
     clearSession();
     return;
   }
+
   const prevPhase = state.room?.phase || null;
   const data = await res.json();
   state.room = data.room;
   state.serverTime = data.serverTime;
   if (state.error) state.error = "";
+
+  if (data.room.latestNotice && data.room.latestNotice.id !== state.lastNoticeId) {
+    state.lastNoticeId = data.room.latestNotice.id;
+    state.notice = data.room.latestNotice.text;
+  }
+
   const isEditingReview = document.activeElement?.id === "review-text";
   if ((state.isComposingReview || isEditingReview) && prevPhase === "writing" && data.room.phase === "writing") {
     updateWritingLiveUI(data.room);
@@ -85,21 +105,16 @@ async function fetchState() {
   render();
 }
 
-function apiUrl(path) {
-  if (!API_BASE_URL) return path;
-  return `${API_BASE_URL}${path}`;
-}
-
 function phaseLabel(phase) {
-  const labels = {
+  const map = {
     lobby: "ロビー",
-    writing: "レビュー執筆",
+    writing: "レビュー入力",
     reveal: "一斉公開",
     voting: "投票",
     results: "ラウンド結果",
     final: "最終結果"
   };
-  return labels[phase] || phase;
+  return map[phase] || phase;
 }
 
 function timeText(ms) {
@@ -120,6 +135,7 @@ function escapeHtml(value) {
 function render() {
   const editorSnapshot = captureEditorSnapshot();
   const voteSnapshot = captureVoteSnapshot();
+
   if (!state.session) {
     renderHome();
     bindHomeEvents();
@@ -129,6 +145,7 @@ function render() {
     app.innerHTML = document.getElementById("loading-template").innerHTML;
     return;
   }
+
   const room = state.room;
   app.innerHTML = `
     <section class="layout">
@@ -136,11 +153,9 @@ function render() {
         <div class="phase-chip">${phaseLabel(room.phase)}</div>
         <h2>ルーム <span class="room-code">${room.roomCode}</span></h2>
         <button class="btn" id="copy-room-code-btn">ルームIDをコピー</button>
-        <p class="subtle">参加者 ${room.players.length}人</p>
+        <p class="subtle">参加者: ${room.players.length}人</p>
         <ul class="players">
-          ${room.players
-            .map((p) => `<li><span>${escapeHtml(p.name)}</span><strong>${p.score}</strong></li>`)
-            .join("")}
+          ${room.players.map((p) => `<li><span>${escapeHtml(p.name)}</span><strong>${p.score}</strong></li>`).join("")}
         </ul>
         <p class="subtle">ラウンド ${Math.max(room.roundIndex + 1, 0)} / ${room.totalRounds}</p>
         <button class="btn" id="leave-btn">退出</button>
@@ -148,56 +163,14 @@ function render() {
       <section class="panel">
         ${renderMain(room)}
         <p class="alert">${escapeHtml(state.error || "")}</p>
+        <p class="ok">${escapeHtml(state.notice || "")}</p>
       </section>
     </section>
   `;
+
   bindInRoomEvents();
   restoreEditorSnapshot(editorSnapshot);
   restoreVoteSnapshot(voteSnapshot);
-}
-
-function captureEditorSnapshot() {
-  const textarea = document.getElementById("review-text");
-  if (!textarea) return null;
-  return {
-    value: textarea.value,
-    selectionStart: textarea.selectionStart,
-    selectionEnd: textarea.selectionEnd,
-    focused: document.activeElement === textarea
-  };
-}
-
-function restoreEditorSnapshot(snapshot) {
-  if (!snapshot) return;
-  const textarea = document.getElementById("review-text");
-  if (!textarea) return;
-  textarea.value = snapshot.value;
-  if (snapshot.focused) {
-    textarea.focus();
-    textarea.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
-  }
-}
-
-function captureVoteSnapshot() {
-  const scoreElements = document.querySelectorAll("[data-rating-for]");
-  if (!scoreElements.length) return null;
-  const ratings = {};
-  for (const el of scoreElements) {
-    ratings[el.dataset.ratingFor] = Number(el.value);
-  }
-  return { ratings };
-}
-
-function restoreVoteSnapshot(snapshot) {
-  if (!snapshot) return;
-  const scoreElements = document.querySelectorAll("[data-rating-for]");
-  if (!scoreElements.length) return;
-  for (const el of scoreElements) {
-    const value = snapshot.ratings[el.dataset.ratingFor];
-    if (Number.isInteger(value) && value >= 1 && value <= 5) {
-      setRatingUI(el.dataset.ratingFor, value);
-    }
-  }
 }
 
 function renderHome() {
@@ -206,14 +179,13 @@ function renderHome() {
       <article class="panel hero">
         <div class="badge">4-10人向け</div>
         <h1>Amber Review</h1>
-        <p>存在しない商品を全員でレビューして笑う、ルーム制パーティーゲーム。</p>
-        <p class="subtle">正解なし。語彙センスと温度感だけで勝負。</p>
+        <p>存在しない商品に、全員でレビューを書くパーティーゲーム。</p>
       </article>
 
       <article class="panel">
         <h2>ルームを作成</h2>
         <label>名前</label>
-        <input id="create-name" placeholder="例: まめ" maxlength="24" />
+        <input id="create-name" maxlength="24" />
         <div class="row">
           <div>
             <label>制限時間(秒)</label>
@@ -224,21 +196,17 @@ function renderHome() {
             <input id="set-rounds" type="number" min="1" max="10" value="5" />
           </div>
         </div>
-        <div class="row">
-          <div>
-            <label>文字数上限(0=無制限)</label>
-            <input id="set-limit" type="number" min="0" max="400" value="0" />
-          </div>
-        </div>
+        <label>文字数上限(0=無制限)</label>
+        <input id="set-limit" type="number" min="0" max="400" value="0" />
         <button class="btn primary" id="create-room-btn">作成して入室</button>
       </article>
 
       <article class="panel">
         <h2>ルームに参加</h2>
         <label>名前</label>
-        <input id="join-name" placeholder="例: ねぎ" maxlength="24" />
+        <input id="join-name" maxlength="24" />
         <label>ルームコード</label>
-        <input id="join-code" placeholder="例: A7X2M" maxlength="5" />
+        <input id="join-code" maxlength="5" />
         <button class="btn secondary" id="join-room-btn">参加する</button>
       </article>
     </section>
@@ -249,16 +217,11 @@ function renderHome() {
 function renderMain(room) {
   if (room.phase === "lobby") {
     return `
-      <h2>開始待ち</h2>
-      <p>ホストが開始すると、全員に同じ「存在しない商品」が表示されます。</p>
-      <p class="subtle">設定: ${room.settings.timeLimitSec}秒 / ${room.settings.roundCount}R / 文字数上限 ${
+      <h2>ロビー待機中</h2>
+      <p class="subtle">設定: ${room.settings.timeLimitSec}秒 / ${room.settings.roundCount}ラウンド / 文字数上限 ${
       room.settings.charLimit === 0 ? "なし" : room.settings.charLimit + "字"
     }</p>
-      ${
-        room.isHost
-          ? '<button class="btn primary" id="start-btn">ゲーム開始</button>'
-          : "<p>ホストの開始を待っています。</p>"
-      }
+      ${room.isHost ? '<button class="btn primary" id="start-btn">ゲーム開始</button>' : "<p>ホストの開始を待っています。</p>"}
     `;
   }
 
@@ -267,12 +230,10 @@ function renderMain(room) {
     return `
       ${renderProduct(room.currentProduct)}
       <p id="writing-timer" class="timer ${remain < 15000 ? "warn" : ""}">残り ${timeText(remain)}</p>
-      <label>レビュー本文</label>
-      <textarea id="review-text" placeholder="自由にレビューを書いてください。">${escapeHtml(room.ownReview || "")}</textarea>
+      <label>レビュー</label>
+      <textarea id="review-text">${escapeHtml(room.ownReview || "")}</textarea>
       <p id="submission-count" class="subtle">提出済み: ${room.submissionCount}/${room.players.length}</p>
-      <div class="row">
-        <button class="btn primary" id="submit-review-btn">${room.ownReview ? "再提出" : "提出する"}</button>
-      </div>
+      <button class="btn primary" id="submit-review-btn">${room.ownReview ? "再提出" : "提出する"}</button>
     `;
   }
 
@@ -281,7 +242,6 @@ function renderMain(room) {
       ${renderProduct(room.currentProduct)}
       <h3>レビュー一斉公開</h3>
       ${renderReviews(room.allRevealedSubmissions)}
-      <p class="subtle">投票画面に移動中...</p>
     `;
   }
 
@@ -290,20 +250,16 @@ function renderMain(room) {
     const targets = room.allRevealedSubmissions.filter((r) => r.playerId !== room.meId);
     return `
       ${renderProduct(room.currentProduct)}
-      <h3>全レビューを評価</h3>
-      <p class="subtle">各レビューを1〜5点で採点してください。</p>
+      <h3>投票</h3>
       <div class="review-list">
         ${targets
           .map(
             (r) => `
           <article class="review-card">
-            <div class="review-head">
-              <strong>${escapeHtml(r.playerName)}</strong>
-            </div>
+            <div class="review-head"><strong>${escapeHtml(r.playerName)}</strong></div>
             <p class="review-text">${escapeHtml(r.text)}</p>
             ${renderRatingButtons(r.playerId, myVote.ratings?.[r.playerId])}
-          </article>
-        `
+          </article>`
           )
           .join("")}
       </div>
@@ -318,23 +274,16 @@ function renderMain(room) {
       <h2>ラウンド ${result.roundNumber} 結果</h2>
       ${renderProduct(result.product)}
       <table class="rank-table">
-        <thead>
-          <tr><th>順位</th><th>プレイヤー</th><th>このラウンド</th><th>合計</th></tr>
-        </thead>
+        <thead><tr><th>順位</th><th>プレイヤー</th><th>このラウンド</th><th>合計</th></tr></thead>
         <tbody>
           ${result.reviews
-            .map(
-              (r, i) =>
-                `<tr><td>${i + 1}</td><td>${escapeHtml(r.playerName)}</td><td>${r.roundPoints}</td><td>${r.totalPoints}</td></tr>`
-            )
+            .map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.playerName)}</td><td>${r.roundPoints}</td><td>${r.totalPoints}</td></tr>`)
             .join("")}
         </tbody>
       </table>
       ${
         room.isHost
-          ? `<button class="btn primary" id="next-round-btn">${
-              room.roundIndex + 1 >= room.totalRounds ? "最終結果へ" : "次のラウンドへ"
-            }</button>`
+          ? `<button class="btn primary" id="next-round-btn">${room.roundIndex + 1 >= room.totalRounds ? "最終結果へ" : "次のラウンドへ"}</button>`
           : "<p>ホストの進行を待っています。</p>"
       }
     `;
@@ -344,16 +293,12 @@ function renderMain(room) {
     return `
       <h2>最終結果</h2>
       <table class="rank-table">
-        <thead>
-          <tr><th>順位</th><th>プレイヤー</th><th>合計点</th></tr>
-        </thead>
+        <thead><tr><th>順位</th><th>プレイヤー</th><th>合計</th></tr></thead>
         <tbody>
-          ${room.finalRanking
-            .map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.playerName)}</td><td>${r.totalPoints}</td></tr>`)
-            .join("")}
+          ${room.finalRanking.map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.playerName)}</td><td>${r.totalPoints}</td></tr>`).join("")}
         </tbody>
       </table>
-      <button class="btn" id="play-again-btn">退出して新規ルームへ</button>
+      <button class="btn" id="play-again-btn">退出</button>
     `;
   }
 
@@ -392,7 +337,7 @@ function renderRatingButtons(playerId, selectedScore) {
   const current = Number.isInteger(selectedScore) ? selectedScore : 1;
   return `
     <input type="hidden" data-rating-for="${playerId}" value="${current}" />
-    <div class="rating-group" data-rating-group="${playerId}">
+    <div class="rating-group">
       ${[1, 2, 3, 4, 5]
         .map(
           (score) =>
@@ -403,11 +348,48 @@ function renderRatingButtons(playerId, selectedScore) {
   `;
 }
 
-function bindHomeEvents() {
-  const createBtn = document.getElementById("create-room-btn");
-  const joinBtn = document.getElementById("join-room-btn");
+function captureEditorSnapshot() {
+  const textarea = document.getElementById("review-text");
+  if (!textarea) return null;
+  return {
+    value: textarea.value,
+    selectionStart: textarea.selectionStart,
+    selectionEnd: textarea.selectionEnd,
+    focused: document.activeElement === textarea
+  };
+}
 
-  createBtn?.addEventListener("click", async () => {
+function restoreEditorSnapshot(snapshot) {
+  if (!snapshot) return;
+  const textarea = document.getElementById("review-text");
+  if (!textarea) return;
+  textarea.value = snapshot.value;
+  if (snapshot.focused) {
+    textarea.focus();
+    textarea.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+  }
+}
+
+function captureVoteSnapshot() {
+  const inputs = document.querySelectorAll("[data-rating-for]");
+  if (!inputs.length) return null;
+  const ratings = {};
+  for (const el of inputs) ratings[el.dataset.ratingFor] = Number(el.value);
+  return { ratings };
+}
+
+function restoreVoteSnapshot(snapshot) {
+  if (!snapshot) return;
+  const inputs = document.querySelectorAll("[data-rating-for]");
+  if (!inputs.length) return;
+  for (const el of inputs) {
+    const score = snapshot.ratings[el.dataset.ratingFor];
+    if (Number.isInteger(score) && score >= 1 && score <= 5) setRatingUI(el.dataset.ratingFor, score);
+  }
+}
+
+function bindHomeEvents() {
+  document.getElementById("create-room-btn")?.addEventListener("click", async () => {
     const name = document.getElementById("create-name").value.trim();
     const settings = {
       timeLimitSec: Number(document.getElementById("set-time").value),
@@ -425,7 +407,7 @@ function bindHomeEvents() {
     }
   });
 
-  joinBtn?.addEventListener("click", async () => {
+  document.getElementById("join-room-btn")?.addEventListener("click", async () => {
     const name = document.getElementById("join-name").value.trim();
     const roomCode = document.getElementById("join-code").value.trim().toUpperCase();
     try {
@@ -441,16 +423,18 @@ function bindHomeEvents() {
 }
 
 function bindInRoomEvents() {
-  document.getElementById("leave-btn")?.addEventListener("click", clearSession);
+  document.getElementById("leave-btn")?.addEventListener("click", leaveRoomWithConfirm);
   document.getElementById("play-again-btn")?.addEventListener("click", clearSession);
+
   document.getElementById("copy-room-code-btn")?.addEventListener("click", async () => {
     const roomCode = state.room?.roomCode || "";
     if (!roomCode) return;
     try {
       await navigator.clipboard.writeText(roomCode);
-      state.error = "ルームIDをコピーしました。";
+      state.notice = "ルームIDをコピーしました。";
+      state.error = "";
     } catch {
-      state.error = `コピー失敗。ルームID: ${roomCode}`;
+      state.error = `コピーに失敗しました。ルームID: ${roomCode}`;
     }
     render();
   });
@@ -485,15 +469,14 @@ function bindInRoomEvents() {
     render();
   });
   reviewText?.addEventListener("blur", () => {
-    if (state.room?.phase === "writing") {
-      fetchState();
-    }
+    if (state.room?.phase === "writing") fetchState();
   });
 
   document.getElementById("submit-vote-btn")?.addEventListener("click", async () => {
-    const scores = document.querySelectorAll("[data-rating-for]");
     const ratings = {};
-    for (const el of scores) ratings[el.dataset.ratingFor] = Number(el.value);
+    document.querySelectorAll("[data-rating-for]").forEach((el) => {
+      ratings[el.dataset.ratingFor] = Number(el.value);
+    });
     try {
       await apiPost("/api/submit-vote", { ...state.session, ratings });
       fetchState();
@@ -520,6 +503,26 @@ function bindInRoomEvents() {
       render();
     }
   });
+}
+
+async function leaveRoomWithConfirm() {
+  if (!state.session || !state.room) {
+    clearSession();
+    return;
+  }
+
+  const firstMessage = state.room.isHost
+    ? "ホストが退出するとルームは解散します。退出しますか？"
+    : "このルームから退出しますか？";
+  if (!window.confirm(firstMessage)) return;
+  if (!window.confirm("最終確認: 本当に退出しますか？")) return;
+
+  try {
+    await apiPost("/api/leave-room", state.session);
+  } catch {
+    // noop
+  }
+  clearSession();
 }
 
 function setRatingUI(playerId, score) {
