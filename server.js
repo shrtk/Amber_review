@@ -20,6 +20,7 @@ const PRODUCTS = [
 ];
 
 const rooms = new Map();
+const closedRooms = new Map();
 
 function json(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -104,6 +105,11 @@ function resetTimer(room) {
     clearTimeout(room.timer);
     room.timer = null;
   }
+}
+
+function addNotice(room, text) {
+  room.noticeSeq = (room.noticeSeq || 0) + 1;
+  room.latestNotice = { id: room.noticeSeq, text, at: Date.now() };
 }
 
 function allSubmitted(room) {
@@ -226,7 +232,8 @@ function roomView(room, meId) {
     myVote: room.roundVotes[meId] || null,
     lastRoundResult: room.lastRoundResult,
     roundHistory: room.phase === "final" ? room.roundHistory : [],
-    finalRanking: room.finalRanking || []
+    finalRanking: room.finalRanking || [],
+    latestNotice: room.latestNotice || null
   };
 }
 
@@ -261,6 +268,8 @@ function handleApi(req, res, parsedUrl) {
           writingDeadline: null,
           revealDeadline: null,
           timer: null,
+          noticeSeq: 0,
+          latestNotice: null,
           createdAt: Date.now(),
           updatedAt: Date.now()
         };
@@ -375,10 +384,60 @@ function handleApi(req, res, parsedUrl) {
       .catch(() => badRequest(res));
   }
 
+  if (req.method === "POST" && parsedUrl.pathname === "/api/leave-room") {
+    return parseBody(req)
+      .then((body) => {
+        const room = getRoom(body.roomCode);
+        if (!room) return json(res, 200, { ok: true });
+
+        const idx = room.players.findIndex((p) => p.id === body.playerId);
+        if (idx < 0) return json(res, 200, { ok: true });
+
+        const leaving = room.players[idx];
+        const isHost = room.hostId === body.playerId;
+
+        if (isHost) {
+          resetTimer(room);
+          closedRooms.set(room.code, { reason: "host_left", at: Date.now() });
+          rooms.delete(room.code);
+          return json(res, 200, { ok: true, roomClosed: true });
+        }
+
+        room.players.splice(idx, 1);
+        delete room.scores[body.playerId];
+        delete room.roundSubmissions[body.playerId];
+        delete room.roundVotes[body.playerId];
+        addNotice(room, `${leaving.name} left the room.`);
+        room.updatedAt = Date.now();
+
+        if (room.players.length === 0) {
+          resetTimer(room);
+          rooms.delete(room.code);
+          return json(res, 200, { ok: true });
+        }
+
+        if (room.phase === "writing" && allSubmitted(room)) {
+          endWriting(room);
+        } else if (room.phase === "voting" && allVoted(room)) {
+          finalizeRound(room);
+        }
+
+        return json(res, 200, { ok: true });
+      })
+      .catch(() => badRequest(res));
+  }
+
   if (req.method === "GET" && parsedUrl.pathname === "/api/state") {
     const room = getRoom(parsedUrl.searchParams.get("roomCode"));
     const playerId = parsedUrl.searchParams.get("playerId");
-    if (!room || !playerId) return json(res, 404, { error: "State not found." });
+    if (!room || !playerId) {
+      const roomCode = String(parsedUrl.searchParams.get("roomCode") || "").toUpperCase();
+      const closed = closedRooms.get(roomCode);
+      if (closed?.reason === "host_left") {
+        return json(res, 410, { error: "Host left. Room closed." });
+      }
+      return json(res, 404, { error: "State not found." });
+    }
     const view = roomView(room, playerId);
     if (!view) return json(res, 403, { error: "Player not in room." });
     return json(res, 200, { serverTime: Date.now(), room: view });
@@ -452,6 +511,11 @@ setInterval(() => {
     if (now - room.updatedAt > ROOM_TTL_MS) {
       resetTimer(room);
       rooms.delete(code);
+    }
+  }
+  for (const [code, closed] of closedRooms.entries()) {
+    if (now - closed.at > ROOM_TTL_MS) {
+      closedRooms.delete(code);
     }
   }
 }, 1000 * 60 * 5);
